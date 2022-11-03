@@ -203,7 +203,7 @@ jobs:
         restore-keys: cache-dist-${{ env.CACHE_VERSION }}-${{ runner.os }}-${{ matrix.ghc }}
 
     - name: Build
-      run: cabal build all
+      run: cabal build all -v3
 
     - name: Run tests
       run: |
