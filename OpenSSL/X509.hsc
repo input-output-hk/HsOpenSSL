@@ -140,10 +140,10 @@ foreign import capi unsafe "openssl/x509.h X509_get_pubkey"
 foreign import capi unsafe "openssl/x509.h X509_set_pubkey"
         _set_pubkey :: Ptr X509_ -> Ptr EVP_PKEY -> IO CInt
 
-foreign import capi unsafe "openssl/x509.h X509_get1_email"
+foreign import capi unsafe "openssl/x509v3.h X509_get1_email"
         _get1_email :: Ptr X509_ -> IO (Ptr STACK)
 
-foreign import capi unsafe "openssl/x509.h X509_email_free"
+foreign import capi unsafe "openssl/x509v3.h X509_email_free"
         _email_free :: Ptr STACK -> IO ()
 
 foreign import capi unsafe "openssl/x509.h X509_sign"

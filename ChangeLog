@@ -1,3 +1,9 @@
+2022-12-21  Vladimir Shabanov  <dev@vshabanov.com>
+
+	* HsOpenSSL.cabal (Version): Bump version to 0.11.7.4
+
+	* Fixes more OpenSSL 3.0.x compilation issues (#74)
+
 2022-12-17  Vladimir Shabanov  <dev@vshabanov.com>
 
 	* HsOpenSSL.cabal (Version): Bump version to 0.11.7.3

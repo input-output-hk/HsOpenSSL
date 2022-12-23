@@ -94,7 +94,7 @@ foreign import capi unsafe "openssl/x509.h X509_REQ_get_pubkey"
 foreign import capi unsafe "openssl/x509.h X509_REQ_set_pubkey"
         _set_pubkey :: Ptr X509_REQ -> Ptr EVP_PKEY -> IO CInt
 
-foreign import capi unsafe "openssl/x509.h X509V3_EXT_nconf_nid"
+foreign import capi unsafe "openssl/x509v3.h X509V3_EXT_nconf_nid"
         _ext_create :: Ptr a -> Ptr b -> CInt -> CString -> IO (Ptr X509_EXT)
 
 foreign import capi unsafe "openssl/x509.h X509_REQ_add_extensions"
