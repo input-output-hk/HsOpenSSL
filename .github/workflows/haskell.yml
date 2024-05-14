@@ -1,0 +1,209 @@
+name: Haskell CI
+
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: 'Tests'
+        required: false
+        default: 'some'
+        options:
+        - some
+        - all
+  create:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    defaults:
+      run:
+        shell: ${{ matrix.os == 'windows-latest' && 'msys2 {0}' || 'bash' }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Add more elements to this list to run multiple instances of the build in CI.  Increasing the
+        # number instances is a good way to trigger flaky build failures
+        n: [1]
+
+        ghc: ["8.10.7"]
+        os: ['ubuntu-latest', 'macos-latest', 'windows-latest']
+
+    env:
+      # OpenSSL is installed in a non-standard location in MacOS. See
+      # https://github.com/actions/virtual-environments/blob/main/images/macos/macos-11-Readme.md
+      PKG_CONFIG_PATH: ${{ matrix.os == 'macos-latest' && '/usr/local/opt/openssl@1.1/lib/pkgconfig' || '' }}
+      # On Windows, pkg-config doesn't output system directories
+      PKG_CONFIG_ALLOW_SYSTEM_CFLAGS: 1
+
+    steps:
+
+    - name: "WIN: Setup MSYS2 and libraries"
+      if: runner.os == 'Windows'
+      uses: msys2/setup-msys2@v2
+      with:
+        update: true
+        install: >-
+          base-devel
+          autoconf-wrapper
+          autoconf
+          automake
+          libtool
+          make
+          git
+          mingw-w64-x86_64-pkg-config
+          mingw-w64-x86_64-toolchain
+          mingw-w64-x86_64-jq
+
+    - name: "LINUX,MAC: Setup haskell"
+      if: runner.os != 'Windows'
+      uses: haskell/actions/setup@v1
+      id: setup-haskell
+      with:
+        ghc-version: ${{ matrix.ghc }}
+        cabal-version: 3.8.1.0
+
+    - name: "WIN: Setup Haskell"
+      id: win-setup-haskell
+      if: runner.os == 'Windows'
+      run: |
+        # see https://gitlab.haskell.org/haskell/ghcup-hs/-/blob/master/scripts/bootstrap/bootstrap-haskell
+        curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | \
+          BOOTSTRAP_HASKELL_NONINTERACTIVE=1 \
+          BOOTSTRAP_HASKELL_ADJUST_CABAL_CONFIG=1 \
+          BOOTSTRAP_HASKELL_ADJUST_BASHRC=1 \
+          BOOTSTRAP_HASKELL_GHC_VERSION="${{ matrix.ghc }}" \
+          BOOTSTRAP_HASKELL_CABAL_VERSION="3.6.2.0" \
+          sh
+
+        # MSYS2 doesn't inherit $GITHUB_PATH so this is needed
+        cat <(echo "source /c/ghcup/env") ~/.bashrc > ~/.bashrc.new
+        mv ~/.bashrc.new ~/.bashrc
+
+        source ~/.bashrc
+
+        # There is an issue with crt libraries, fixed by prepending the ghc
+        # mingw32 libraries directory to every other library directory.
+        echo "# Original cabal config extra-lib-dirs"
+        grep extra-lib-dirs /c/cabal/config
+
+        sed -i 's/C:\\msys64\\mingw64\\lib/C:\\ghcup\\ghc\\8.10.7\\mingw\\x86_64-w64-mingw32\\lib, C:\\msys64\\mingw64\\lib/g' /c/cabal/config
+
+        echo "# Modified cabal config extra-lib-dirs"
+        grep extra-lib-dirs /c/cabal/config
+
+        ghc --version
+        cabal --version
+        echo "::set-output name=cabal-store::$(cabal --help | tail -1 | tr -d ' ' | rev | cut -d '/' -f2- | rev)\\store"
+
+    - name: Set cache version
+      run: echo "CACHE_VERSION=grFfw8r" >> $GITHUB_ENV
+
+    - uses: actions/checkout@v2
+
+    - name: Add build script path
+      run: |
+        if [ "${{ runner.os }}" == "Windows" ]; then
+          # MSYS2 doesn't inherit $GITHUB_PATH, so this workaround is needed
+          cat <(echo "export PATH=$PATH:$(pwd)/.github/bin") ~/.bashrc > ~/.bashrc.new
+          mv ~/.bashrc.new ~/.bashrc
+        else
+          # MacOS and Linux use $GITUB_PATH
+          echo "$(pwd)/.github/bin" >> $GITHUB_PATH
+        fi
+
+    - name: "LINUX: Install build environment (apt-get)"
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get -y install libsystemd0 libsystemd-dev
+        sudo apt-get -y remove --purge software-properties-common
+        sudo apt-get -y autoremove
+
+    - name: "List all pkg-config packages"
+      run: |
+        if [ "${{ runner.os }}" == "macOS" ]; then
+          echo "=== Not printing every package detail in MacOS"
+          # due to the location of the installed libraries this fails on MacOS with stuff not related to us
+        else
+          echo "=== Package list ==="
+          pkg-config --list-all
+
+          echo "=== Package details ==="
+          for x in $(pkg-config --list-all | cut -d ' ' -f 1); do
+            echo "# $x"
+            pkg-config "$x" --cflags --libs
+          done
+
+          echo "=== openssl details ==="
+          pkg-config --cflags --libs openssl
+          echo "=== libcrypto details ==="
+          pkg-config --cflags --libs libcrypto
+          echo "=== libssl details ==="
+          pkg-config --cflags --libs libssl
+
+          echo "=== Find ==="
+          find 'D:/' -name '*.pc' || true
+
+          echo "=== openssl pc files ==="
+          cat 'D:\a\_temp\msys64\mingw64\lib\pkgconfig\openssl.pc' || true
+          echo "=== libcrypto pc files ==="
+          cat 'D:\a\_temp\msys64\mingw64\lib\pkgconfig\libcrypto.pc' || true
+          echo "=== libssl pc files ==="
+          cat 'D:\a\_temp\msys64\mingw64\lib\pkgconfig\libssl.pc' || true
+
+          echo "=== pkg-config flags ==="
+          echo "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=$PKG_CONFIG_ALLOW_SYSTEM_CFLAGS"
+        fi
+
+    - name: Cabal update
+      run: cabal update
+
+    - name: Configure build
+      run: |
+        if [ "${{github.event.inputs.tests}}" == "all" ]; then
+          echo "Reconfigure cabal projects to run tests for all dependencies"
+          sed -i 's|tests: False|tests: True|g' cabal.project
+        fi
+
+        echo "uname: $(uname -s)"
+
+        cp .github/workflows/cabal.project.local.ci cabal.project.local
+
+        echo "# cabal.project.local"
+        cat cabal.project.local
+
+    - name: Record dependencies
+      id: record-deps
+      run: |
+        cabal build all --dry-run
+        cat ${{ env.PLAN_JSON }} | jq -r '."install-plan"[].id' | sort | uniq > dependencies.txt
+        date > date.txt
+        echo "::set-output name=weeknum::$(/bin/date -u "+%W")"
+
+    - name: Cache Cabal store
+      uses: actions/cache@v2
+      with:
+        path: ${{ runner.os == 'Windows' && steps.win-setup-haskell.outputs.cabal-store || steps.setup-haskell.outputs.cabal-store }}
+        key: cache-${{ env.CACHE_VERSION }}-${{ runner.os }}-${{ matrix.ghc }}-${{ hashFiles('dependencies.txt') }}-${{ hashFiles('date.txt') }}
+        restore-keys: |
+          cache-${{ env.CACHE_VERSION }}-${{ runner.os }}-${{ matrix.ghc }}-${{ hashFiles('dependencies.txt') }}
+          cache-${{ env.CACHE_VERSION }}-${{ runner.os }}-${{ matrix.ghc }}
+
+    - uses: actions/cache@v2
+      name: "Cache `dist-newstyle`"
+      with:
+        path: |
+          dist-newstyle
+          !dist-newstyle/**/.git
+        key: cache-dist-${{ env.CACHE_VERSION }}-${{ runner.os }}-${{ matrix.ghc }}-${{ steps.record-deps.outputs.weeknum }}
+        restore-keys: cache-dist-${{ env.CACHE_VERSION }}-${{ runner.os }}-${{ matrix.ghc }}
+
+    - name: Build
+      run: cabal build all -v3
+
+    - name: Run tests
+      run: |
+        cabal test all
